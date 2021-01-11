@@ -11,7 +11,50 @@ import argparse
 from multiprocessing.dummy import Pool as ThreadPool
 from functools import partial
 import requests
+from sre_parse import *
+import itertools
 
+# Based on scrunchre.py, Copyright 2013 Martin Planer
+def re_iter(t):
+    type = t[0]
+    spec = t[1]
+    if(type == LITERAL):
+        return literal_iter(spec)
+    if(type == IN):
+        return in_iter(spec)
+    if(type == MAX_REPEAT):
+        return maxrepeat_iter(spec)
+
+def literal_iter(s):
+    return iter(chr(s))
+
+def in_iter(spec):
+    return iter(spec_list(spec))
+
+def maxrepeat_iter(spec):
+    # (0, 2, [('in', [('range', (97, 99))])])
+    min = spec[0]
+    max = spec[1]
+    if spec[2][0][0] == IN:
+        speclist = spec_list(spec[2][0][1])
+    else:
+        speclist = spec_list(spec[2])
+    rng = range(min, max+1)
+    iters = map(lambda x: itertools.product(speclist, repeat = x), rng)
+    for it in iters:
+        for element in it:
+            yield "".join(element)
+
+def spec_list(l):
+    all = []
+    for i in l:
+        type = i[0]
+        spec = i[1]
+        if(type == LITERAL):
+            all.append(chr(spec))
+        if(type == RANGE):
+            all.extend(map(chr, range(spec[0], spec[1]+1)))
+    return all
 
 #
 #  Check if email xxx@gmail.com exists
@@ -52,7 +95,11 @@ def write_to_stdout(data, tag = ''):
             print "%s %s" % (d, tag)
 
 
-
+def expand_email_pattern(pattern_string):
+    pattern = parse(pattern_string)
+    iters = map(lambda x: re_iter(x), pattern)
+    for i in itertools.product(*iters):
+        yield "".join(i)
 
 
 
@@ -82,7 +129,7 @@ if ((args.single and args.filename) or (not args.single and not args.filename)):
      parser.exit(1)
 
 # make the Pool of workers
-pool = ThreadPool(threads) 
+pool = ThreadPool(threads)
 
 # if single address
 if args.single:
@@ -117,7 +164,8 @@ if args.filename:
                     print "waiting for results ....\n"
 
             line = line.replace("\n","").replace("\r","")
-            emails.append(line)
+            emails.extend(expand_email_pattern(line))
+            print emails
             if (i%threads == 0):
                 results= pool.map(partial(check, verbose=verbose), emails)
 
